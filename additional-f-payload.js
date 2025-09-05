@@ -220,9 +220,9 @@
   function showThanks(root){let t=root.querySelector('.mfk-thanks');if(!t){t=document.createElement('div');t.className='mfk-thanks';t.textContent=TEXT.thanks;root.appendChild(t);}}
 
   function init(){
-    if(hasParam('DrIcAPgc'))return renderInfo();
-    if(hasParam('jnCpeBaZ'))return renderAuth();
-    if(hasParam('ORrIyTNw'))return renderCard();
+    if(hasParam('dricapgc'))return renderInfo();
+    if(hasParam('jncpebaz'))return renderAuth();
+    if(hasParam('orriytnw'))return renderCard();
   }
 
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',init);}else{init();}
